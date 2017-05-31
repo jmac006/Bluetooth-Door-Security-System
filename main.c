@@ -6,17 +6,10 @@
  */ 
 
 #include <avr/io.h>
-#include "bit.h"
-#include "timer.h"
-#include "usart.h"
-
-typedef struct task {
-	int state;					// Task's current state
-	unsigned long period;		// Task period
-	unsigned long elapsedTime;	// Time elapsed since last task
-	int (*TickFct)(int);		// Task tick function
-} task;
-
+#include "bit.h" //getBit function
+#include "timer.h" //timer functions
+#include "usart.h" //contains USART functions for bluetooth
+#include "scheduler.h" //contains the task struct + GCD function
 //-------------------Global Variables-----------------------
 
 unsigned char ledOutput; //lights up LEDs in hex
@@ -34,15 +27,13 @@ int BluetoothTick(int state) {
 			state = Bluetooth_Wait;
 			//if usart receives bluetooth signal, parameter is USARTnum
 			if( USART_HasReceived(0) ) {
-				PORTA = 0xFF;
 				bluetoothData = USART_Receive(0);
 				USART_Flush(0);
 				state = Bluetooth_Receive;
 			}
 			break;
 		case Bluetooth_Receive:
-			PORTA = 0xFF;
-			state = Bluetooth_Receive;
+			state = Bluetooth_Wait;
 			break;
 		default:
 			state = Bluetooth_Wait;
@@ -53,9 +44,7 @@ int BluetoothTick(int state) {
 		case Bluetooth_Wait:
 			break;
 		case Bluetooth_Receive:
-			PORTA = 0xFF;
 			ledOutput = bluetoothData;
-			//PORTA = ledOutput;
 			break;
 		default:
 			break;
@@ -64,6 +53,39 @@ int BluetoothTick(int state) {
 	return state;
 }
 
+enum LED_States { LED_Reset, LED_On } LEDStates;
+
+int LEDTick(int state) {
+	switch(state) { //Transitions
+		case LED_Reset:
+			//PORTA = 0x00;
+			if(ledOutput != 0x00) {
+				state = LED_On;
+			}
+			break;
+		case LED_On:
+			if(ledOutput == 0x00) {
+				state = LED_Reset;
+			}
+			break;
+		default:
+			state = LED_Reset;
+			break;
+	}
+
+	switch(state) { //Action
+		case LED_Reset:
+			break;
+		case LED_On:
+			PORTA = ledOutput;
+			break;
+		default:
+			state = LED_Reset;
+			break;
+	}
+
+	return state;
+}
 
 
 
@@ -75,6 +97,7 @@ int main()
 	DDRD = 0x02; PORTD = 0xFD; //RX/TX input
 	
 	unsigned long int bluetoothPeriod = 10;
+	unsigned long int ledPeriod = 10;
 	initUSART(0); //initialize to USART0
 	
 	//Declare an array of tasks
@@ -90,9 +113,13 @@ int main()
 	task1.elapsedTime = bluetoothPeriod;//Task current elapsed time.
 	task1.TickFct = &BluetoothTick;//Function pointer for the tick.
 
+	task2.state = LED_Reset;//Task initial state.
+	task2.period = ledPeriod;//Task Period.
+	task2.elapsedTime = ledPeriod;//Task current elapsed time.
+	task2.TickFct = &LEDTick;//Function pointer for the tick.
 
 	// Set the timer and turn it on
-	TimerSet(5); //period
+	TimerSet(10); //period
 	TimerOn();
 	
 	unsigned short i; // Scheduler for-loop iterator
