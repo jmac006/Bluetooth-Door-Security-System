@@ -8,149 +8,88 @@
 #include <avr/io.h>
 #include "bit.h"
 #include "timer.h"
-#include "io.c"
 #include "usart.h"
 
-// Returns '\0' if no key pressed, else returns char '1', '2', ... '9', 'A', ...
-// If multiple keys pressed, returns leftmost-topmost one
-// Keypad must be connected to port C
-unsigned char GetKeypadKey() {
-
-	PORTC = 0xEF; // Enable col 4 with 0, disable others with 1’s
-	asm("nop"); // add a delay to allow PORTC to stabilize before checking
-	if (GetBit(PINC,0)==0) { return('1'); }
-	if (GetBit(PINC,1)==0) { return('4'); }
-	if (GetBit(PINC,2)==0) { return('7'); }
-	if (GetBit(PINC,3)==0) { return('*'); }
-
-	// Check keys in col 2
-	PORTC = 0xDF; // Enable col 5 with 0, disable others with 1’s
-	asm("nop"); // add a delay to allow PORTC to stabilize before checking
-	if (GetBit(PINC,0)==0) { return('2'); }
-	if (GetBit(PINC,1)==0) { return('5'); }
-	if (GetBit(PINC,2)==0) { return('8'); }
-	if (GetBit(PINC,3)==0) { return('0'); }
-	// ... *****FINISH*****
-
-	// Check keys in col 3
-	PORTC = 0xBF; // Enable col 6 with 0, disable others with 1’s
-	asm("nop"); // add a delay to allow PORTC to stabilize before checking
-	if (GetBit(PINC,0)==0) { return('3'); }
-	if (GetBit(PINC,1)==0) { return('6'); }
-	if (GetBit(PINC,2)==0) { return('9'); }
-	if (GetBit(PINC,3)==0) { return('#'); }
-	// ... *****FINISH*****
-
-	// Check keys in col 4
-	PORTC = 0x7F;
-	asm("nop");
-	if (GetBit(PINC,0)==0) { return('A'); }
-	if (GetBit(PINC,1)==0) { return('B'); }
-	if (GetBit(PINC,2)==0) { return('C'); }
-	if (GetBit(PINC,3)==0) { return('D'); }
-	// ... *****FINISH*****
-
-	return('\0'); // default value
-
-}
-
-//------------------------Tasks---------------------------------
 typedef struct task {
 	int state;					// Task's current state
 	unsigned long period;		// Task period
 	unsigned long elapsedTime;	// Time elapsed since last task
 	int (*TickFct)(int);		// Task tick function
 } task;
-//------------------------Tasks---------------------------------
 
-//------------------------Shared Variables-----------------------
-unsigned char keypadOutput;
-//------------------------End Shared Variables-------------------
+//-------------------Global Variables-----------------------
 
-//-----------------------Keypad_SM-------------------------------
-enum KeypadStates {keypadStart, keypadGet };
+unsigned char ledOutput; //lights up LEDs in hex
+unsigned char bluetoothData; //bluetooth data from USART
 
-int GetKeypadTick(int state) {
-	switch (state) {
-		case keypadStart:
-			state = keypadGet;
-			break;
-		case keypadGet:
-			break;
-	}
-	
-	switch (state) {
-		case keypadStart:
-			break;
-		case keypadGet:
-			keypadOutput = GetKeypadKey();
-			break;
-	}
-	
-	return state;
-}
-//-----------------------Keypad_SM-------------------------------
+//-------------------End Global Variables-------------------
 
-//------------------------LED_SM---------------------------------
-enum LCD_States { LCD_Start, LCD_Display };
 
-int LCDTick(int state) {
-	switch(state) {
-		case LCD_Start:
-			state = LCD_Display;
-			break;
-		case LCD_Display:
-			break;
-		default:
-			state = LCD_Start;
-			break;
-	}
-	
-	switch (state) {
-		case LCD_Start:
-			break;
-		case LCD_Display:
-			if (keypadOutput != NULL) {
-				LCD_Cursor(1);
-				LCD_WriteData(keypadOutput);
+//------------------------Bluetooth_SM---------------------------------
+enum Bluetooth_States { Bluetooth_Wait, Bluetooth_Receive } bluetoothStates;
+
+int BluetoothTick(int state) {
+	switch(state) { //Transitions
+		case Bluetooth_Wait:
+			state = Bluetooth_Wait;
+			//if usart receives bluetooth signal, parameter is USARTnum
+			if( USART_HasReceived(0) ) {
+				PORTA = 0xFF;
+				bluetoothData = USART_Receive(0);
+				USART_Flush(0);
+				state = Bluetooth_Receive;
 			}
 			break;
+		case Bluetooth_Receive:
+			PORTA = 0xFF;
+			state = Bluetooth_Receive;
+			break;
 		default:
-		break;
+			state = Bluetooth_Wait;
+			break;
+	}
+	
+	switch (state) { //Actions
+		case Bluetooth_Wait:
+			break;
+		case Bluetooth_Receive:
+			PORTA = 0xFF;
+			ledOutput = bluetoothData;
+			//PORTA = ledOutput;
+			break;
+		default:
+			break;
 	}
 
 	return state;
 }
-//------------------------LED_SM---------------------------------
+
+
 
 
 int main()
 {
-	DDRC = 0xF0; PORTC = 0x0F; // PC7..4 outputs init 0s, PC3..0 inputs init 1s
-	DDRA = 0xFF; PORTA = 0x00;
-	DDRD = 0xFF; PORTD = 0x00;
+	//DDRC = 0xF0; PORTC = 0x0F; // PC7..4 outputs init 0s, PC3..0 inputs init 1s
+	DDRB = 0xFF; PORTB = 0x00;
+	DDRA = 0xFF; PORTA = 0x00; //initialize A to output
+	DDRD = 0x02; PORTD = 0xFD; //RX/TX input
 	
-	unsigned long int keypadPeriod = 5;
-	unsigned long int LCDPeriod = 10;
-	
-	LCD_init();
+	unsigned long int bluetoothPeriod = 10;
+	initUSART(0); //initialize to USART0
 	
 	//Declare an array of tasks
+	//static task task1, task2;
+	//task *tasks[] = { &task1, &task2};
 	static task task1, task2;
 	task *tasks[] = { &task1, &task2};
 	const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
 
 	// Task 1
-	task1.state = keypadStart;//Task initial state.
-	task1.period = keypadPeriod;//Task Period.
-	task1.elapsedTime = keypadPeriod;//Task current elapsed time.
-	task1.TickFct = &GetKeypadTick;//Function pointer for the tick.
+	task1.state = Bluetooth_Wait;//Task initial state.
+	task1.period = bluetoothPeriod;//Task Period.
+	task1.elapsedTime = bluetoothPeriod;//Task current elapsed time.
+	task1.TickFct = &BluetoothTick;//Function pointer for the tick.
 
-	// Task 2
-	task2.state = LCD_Start;//Task initial state.
-	task2.period = LCDPeriod;//Task Period.
-	task2.elapsedTime = LCDPeriod;//Task current elapsed time.
-	task2.TickFct = &LCDTick;//Function pointer for the tick.
 
 	// Set the timer and turn it on
 	TimerSet(5); //period
