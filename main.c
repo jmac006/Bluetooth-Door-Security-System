@@ -16,7 +16,7 @@
 unsigned char ledOutput; //lights up LEDs in hex
 unsigned char bluetoothData; //bluetooth data from USART
 unsigned char sound = 1;
-unsigned char isLocked = 0; //boolean value
+unsigned char isLocked = 1; //boolean value
 
 //Frequency to play notes
 #define C4 261.63
@@ -77,32 +77,38 @@ void PWM_off() { //Function from lab 9
 
 
 //------------------------Bluetooth_SM--------------------------
-enum Bluetooth_States { Bluetooth_Wait, Bluetooth_Receive } bluetoothStates;
+enum Bluetooth_States { bluetoothWait, bluetoothReceive } bluetoothStates;
 
 int BluetoothTick(int state) {
 	switch(state) { //Transitions
-		case Bluetooth_Wait:
-			state = Bluetooth_Wait;
+		case bluetoothWait:
+			state = bluetoothWait;
 			//if usart receives bluetooth signal, parameter is USARTnum
 			if( USART_HasReceived(0) ) {
 				bluetoothData = USART_Receive(0);
 				USART_Flush(0);
-				state = Bluetooth_Receive;
+				state = bluetoothReceive;
 			}
 			break;
-		case Bluetooth_Receive:
-			state = Bluetooth_Wait;
+		case bluetoothReceive:
+			state = bluetoothWait;
 			break;
 		default:
-			state = Bluetooth_Wait;
+			state = bluetoothWait;
 			break;
 	}
 	
 	switch (state) { //Actions
-		case Bluetooth_Wait:
+		case bluetoothWait:
 			break;
-		case Bluetooth_Receive:
+		case bluetoothReceive:
 			ledOutput = bluetoothData;
+			if(bluetoothData == 0x01) {
+				isLocked = 0; //unlock the door
+			}
+			else if(bluetoothData == 0x02) {
+				isLocked = 1;
+			}
 			break;
 		default:
 			break;
@@ -146,14 +152,14 @@ int LEDTick(int state) {
 	return state;
 }
 
-#define PIR_sensor PB0
 //------------------------IR_SM--------------------------
-enum IR_States { IR_On } IRStates;
+#define PIR_sensor PA0
+enum PIR_States { IR_On } PIRStates;
 
 //PIR Sensor information found from: 
 //https://www.exploreembedded.com/wiki/PIR_motion_Sensor_interface_with_Atmega128
 int IRTick(int state) {
-	DDRB = (0 << PIR_sensor);
+	DDRA = (0 << PIR_sensor);
 	switch(state) { //Transitions
 		case IR_On:
 			state = IR_On;
@@ -165,11 +171,12 @@ int IRTick(int state) {
 
 	switch(state) { //Actions
 		case IR_On:
-			if(((PINB) & (1<<PIR_sensor)) == 1) {
-				ledOutput = 0x03;
+			if(((PINA) & (1<<PIR_sensor)) == 0) { //Motion detected
+				ledOutput = 0x00;
 			}
-			if(((PINB) & (1<<PIR_sensor)) == 0) {
-				ledOutput = 0x0F;
+			else {
+				//sound = 4;
+				ledOutput = 0x01;
 			}
 			break;
 		default:
@@ -306,21 +313,20 @@ void SpeakerTick(){
 	}
 }
 
-
 int main()
 {
 	DDRA = 0x00; PORTA = 0xFF;
 	DDRB = 0xFF; PORTB = 0x00;
 	DDRC = 0xFF; PORTC = 0x00; //initialize C to output
-	DDRD = 0x02; PORTD = 0xFD; //RX/TX input
+	DDRD = 0x02; PORTD = 0xFD; //TX = output, rest are inputs
 	
 	unsigned long int bluetoothPeriod = 10;
 	unsigned long int ledPeriod = 10;
-	unsigned long int IRPeriod = 5;
+	unsigned long int PIRPeriod = 5;
 	unsigned long int speakerPeriod = 5;
 
 	unsigned long int systemPeriod = findGCD(bluetoothPeriod,ledPeriod);
-	systemPeriod = findGCD(systemPeriod, IRPeriod);
+	systemPeriod = findGCD(systemPeriod, PIRPeriod);
 	systemPeriod = findGCD(systemPeriod, speakerPeriod);
 
 	PWM_on();
@@ -333,7 +339,7 @@ int main()
 	const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
 
 	//Bluetooth Task
-	task1.state = Bluetooth_Wait;
+	task1.state = bluetoothWait;
 	task1.period = bluetoothPeriod;
 	task1.elapsedTime = bluetoothPeriod;
 	task1.TickFct = &BluetoothTick;
@@ -346,8 +352,8 @@ int main()
 
 	//IR Task
 	task3.state = IR_On;
-	task3.period = IRPeriod;
-	task3.elapsedTime = IRPeriod;
+	task3.period = PIRPeriod;
+	task3.elapsedTime = PIRPeriod;
 	task3.TickFct = &IRTick;
 
 	//Speaker Task
