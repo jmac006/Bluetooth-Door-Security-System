@@ -15,7 +15,7 @@
 
 unsigned char ledOutput; //lights up LEDs in hex
 unsigned char bluetoothData; //bluetooth data from USART
-unsigned char sound = 1;
+unsigned char soundType = 1;
 unsigned char isLocked = 1; //boolean value
 unsigned char passAttempt = 0; //counts number of incorrect password attempts
 
@@ -78,7 +78,7 @@ void PWM_off() { //Function from lab 9
 
 
 //------------------------Bluetooth_SM--------------------------
-enum Bluetooth_States { bluetoothWait, bluetoothReceive1, bluetoothReceive2, bluetoothReceive3 } bluetoothStates;
+enum Bluetooth_States { bluetoothInit, bluetoothReceive1, bluetoothReceive2, bluetoothReceive3 } bluetoothStates;
 
 unsigned char password1 = 0x01;
 unsigned char password2 = 0x02;
@@ -87,8 +87,8 @@ unsigned char trypass1, trypass2, trypass3;
 
 int BluetoothTick(int state) {
 	switch(state) { //Transitions
-		case bluetoothWait:
-			state = bluetoothWait;
+		case bluetoothInit:
+			state = bluetoothInit;
 			//if usart receives bluetooth signal, parameter is USARTnum
 			if( USART_HasReceived(0) ) {
 				bluetoothData = USART_Receive(0);
@@ -117,43 +117,59 @@ int BluetoothTick(int state) {
 			if( USART_HasReceived(0) ) {
 				bluetoothData = USART_Receive(0);
 				USART_Flush(0);
-				state = bluetoothWait;
+				state = bluetoothInit;
 			}
 			break;
 		default:
-			state = bluetoothWait;
+			state = bluetoothInit;
 			break;
 	}
 	
 	switch (state) { //Actions
-		case bluetoothWait:
-			sound = 0;
+		case bluetoothInit:
+			soundType = 0; //no sound
 			break;
 		case bluetoothReceive1:
 			ledOutput = bluetoothData;
 			trypass1 = bluetoothData;
+			if(bluetoothData == 0xFF) { //lock the door
+				isLocked = 1;
+				soundType = 0;
+				state = bluetoothInit;
+			}
 			break;
 		case bluetoothReceive2:
 			ledOutput = bluetoothData;
 			trypass2 = bluetoothData;
+			if(bluetoothData == 0xFF) {
+				isLocked = 1;
+				soundType = 0;
+				state = bluetoothInit;
+			}
 			break;
 		case bluetoothReceive3:
+			if(bluetoothData == 0xFF) {
+				isLocked = 1;
+				soundType = 0;
+				state = bluetoothInit;
+			}
 			ledOutput = bluetoothData;
 			trypass3 = bluetoothData;
 			if(trypass1 == password1 && trypass2 == password2 && trypass3 == password3) {
 				isLocked = 0; //unlock the door
 				ledOutput = 0xFF;
-				sound = 5;
-				state = bluetoothWait;
+				soundType = 5; //correct password sound
+				passAttempt = 0; //reset the password attempts
+				state = bluetoothInit;
 			}
 			else {
 				isLocked = 1; //door should still be locked
 				passAttempt++;
-				sound = 3;
-				state = bluetoothWait;
+				soundType = 3; //incorrect password sound
+				state = bluetoothInit;
 			}
-			if(passAttempt == 3) { //sound the alarm if 3 pass attempts
-				sound = 4;
+			if(passAttempt == 3) {
+				soundType = 4; //alarm sound if user incorrectly enters pass 3 times
 			}
 			break;
 		default:
@@ -217,12 +233,9 @@ int IRTick(int state) {
 
 	switch(state) { //Actions
 		case IR_On:
-			if(((PINA) & (1<<PIR_sensor)) == 1) { //Motion detected
+			if(((PINA) & (1<<PIR_sensor)) == 1 && isLocked == 1) { //Motion detected
 				ledOutput = 0x01;
-				//sound = 4;
-			}
-			else {
-				//ledOutput = 0x00;
+				soundType = 4; //alarm sound
 			}
 			break;
 		default:
@@ -241,24 +254,24 @@ void SpeakerTick(){
 	switch(speakerState){
 
 		case SpeakerSetup:
-			if(sound == 1){
-				sound = 0;
+			if(soundType == 1){
+				soundType = 0;
 				speakerState = LockSound;
 			}
-			else if(sound == 2){
-				sound = 0;
+			else if(soundType == 2){
+				soundType = 0;
 				speakerState = UnlockSound;
 			}
-			else if(sound == 3){
-				sound = 0;
+			else if(soundType == 3){
+				soundType = 0;
 				speakerState = FailSound;
 			}
-			else if(sound == 4){
-				sound = 0;
+			else if(soundType == 4){
+				soundType = 0;
 				speakerState = AlarmSound;
 			}
-			else if(sound == 5){
-				sound = 0;
+			else if(soundType == 5){
+				soundType = 0;
 				speakerState = CorrectSound;
 			}
 			else{
@@ -309,7 +322,7 @@ void SpeakerTick(){
 		case AlarmSound:
 			if(index < 16){
 				speakerState = AlarmSound;
-				if (index == 15) {
+				if (index == 15 && isLocked == 1) {
 					index = 0; //repeat alarm
 				}
 			}
@@ -385,7 +398,7 @@ int main()
 	const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
 
 	//Bluetooth Task
-	task1.state = bluetoothWait;
+	task1.state = bluetoothInit;
 	task1.period = bluetoothPeriod;
 	task1.elapsedTime = bluetoothPeriod;
 	task1.TickFct = &BluetoothTick;
