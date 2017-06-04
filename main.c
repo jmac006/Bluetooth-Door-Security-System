@@ -17,6 +17,7 @@ unsigned char ledOutput; //lights up LEDs in hex
 unsigned char bluetoothData; //bluetooth data from USART
 unsigned char sound = 1;
 unsigned char isLocked = 1; //boolean value
+unsigned char passAttempt = 0; //counts number of incorrect password attempts
 
 //Frequency to play notes
 #define C4 261.63
@@ -77,7 +78,12 @@ void PWM_off() { //Function from lab 9
 
 
 //------------------------Bluetooth_SM--------------------------
-enum Bluetooth_States { bluetoothWait, bluetoothReceive } bluetoothStates;
+enum Bluetooth_States { bluetoothWait, bluetoothReceive1, bluetoothReceive2, bluetoothReceive3 } bluetoothStates;
+
+unsigned char password1 = 0x01;
+unsigned char password2 = 0x02;
+unsigned char password3 = 0x03;
+unsigned char trypass1, trypass2, trypass3;
 
 int BluetoothTick(int state) {
 	switch(state) { //Transitions
@@ -87,11 +93,32 @@ int BluetoothTick(int state) {
 			if( USART_HasReceived(0) ) {
 				bluetoothData = USART_Receive(0);
 				USART_Flush(0);
-				state = bluetoothReceive;
+				state = bluetoothReceive1;
 			}
 			break;
-		case bluetoothReceive:
-			state = bluetoothWait;
+		case bluetoothReceive1:
+			state = bluetoothReceive1;
+			if( USART_HasReceived(0) ) {
+				bluetoothData = USART_Receive(0);
+				USART_Flush(0);
+				state = bluetoothReceive2;
+			}
+			break;
+		case bluetoothReceive2:
+			state = bluetoothReceive2;
+			if( USART_HasReceived(0) ) {
+				bluetoothData = USART_Receive(0);
+				USART_Flush(0);
+				state = bluetoothReceive3;
+			}
+			break;
+		case bluetoothReceive3:
+			state = bluetoothReceive3;
+			if( USART_HasReceived(0) ) {
+				bluetoothData = USART_Receive(0);
+				USART_Flush(0);
+				state = bluetoothWait;
+			}
 			break;
 		default:
 			state = bluetoothWait;
@@ -100,14 +127,33 @@ int BluetoothTick(int state) {
 	
 	switch (state) { //Actions
 		case bluetoothWait:
+			sound = 0;
 			break;
-		case bluetoothReceive:
+		case bluetoothReceive1:
 			ledOutput = bluetoothData;
-			if(bluetoothData == 0x01) {
+			trypass1 = bluetoothData;
+			break;
+		case bluetoothReceive2:
+			ledOutput = bluetoothData;
+			trypass2 = bluetoothData;
+			break;
+		case bluetoothReceive3:
+			ledOutput = bluetoothData;
+			trypass3 = bluetoothData;
+			if(trypass1 == password1 && trypass2 == password2 && trypass3 == password3) {
 				isLocked = 0; //unlock the door
+				ledOutput = 0xFF;
+				sound = 5;
+				state = bluetoothWait;
 			}
-			else if(bluetoothData == 0x02) {
-				isLocked = 1;
+			else {
+				isLocked = 1; //door should still be locked
+				passAttempt++;
+				sound = 3;
+				state = bluetoothWait;
+			}
+			if(passAttempt == 3) { //sound the alarm if 3 pass attempts
+				sound = 4;
 			}
 			break;
 		default:
@@ -171,12 +217,12 @@ int IRTick(int state) {
 
 	switch(state) { //Actions
 		case IR_On:
-			if(((PINA) & (1<<PIR_sensor)) == 0) { //Motion detected
-				ledOutput = 0x00;
+			if(((PINA) & (1<<PIR_sensor)) == 1) { //Motion detected
+				ledOutput = 0x01;
+				//sound = 4;
 			}
 			else {
-				//sound = 4;
-				ledOutput = 0x01;
+				//ledOutput = 0x00;
 			}
 			break;
 		default:
@@ -315,7 +361,7 @@ void SpeakerTick(){
 
 int main()
 {
-	DDRA = 0x00; PORTA = 0xFF;
+	DDRA = 0x00; PORTA = 0xFF; //initialize A to input
 	DDRB = 0xFF; PORTB = 0x00;
 	DDRC = 0xFF; PORTC = 0x00; //initialize C to output
 	DDRD = 0x02; PORTD = 0xFD; //TX = output, rest are inputs
