@@ -15,12 +15,66 @@
 
 unsigned char ledOutput; //lights up LEDs in hex
 unsigned char bluetoothData; //bluetooth data from USART
-unsigned char sound = 5;
+unsigned char sound = 1;
 unsigned char isLocked = 0; //boolean value
+
+//Frequency to play notes
+#define C4 261.63
+#define D4 293.66
+#define E4 329.63
+#define F4 249.23
+#define G4 392.00
+#define A4 440.00
+#define B4 493.88
+#define C5 523.25
+
+const double lockSound[16] = {C5, C5, B4, B4, A4, A4, G4, G4, F4, F4, E4, E4, D4, D4, C4, C4};
+const double unlockSound[16] = {C4, C4, D4, D4, E4, E4, F4, F4, G4, G4, A4, A4, B4, B4, C5, C5};
+const double alarmSound[16] = {G4, G4, G4, G4, C4, C4, C4, C4, G4, G4, G4, G4, C4, C4, C4, C4};
+const double correctPinSound[16] = {C4, C4, C4, C4, E4, E4, E4, E4, A4, A4, A4, A4, C5, C5, C5, C5};
+const double incorrectPin[16] = {C5, C5, C5, C5, C5, C5, C5, C5, C4, C4, C4, C4, C4, C4, C4, C4};
+
+#define PIR_DDR  DDRA
+#define PIR_READ PINA
+#define PIR_PIN  0
+
+unsigned char pir_read()
+{
+	PIR_DDR &= ~(1 << PIR_PIN); // Set input
+	return ((PIR_READ & ( 1 << PIR_PIN) ) >> PIR_PIN); 
+}
 
 void ADC_init() { //taken from Lab 8
 	ADCSRA |= (1 << ADEN) | (1 << ADSC) | (1 << ADATE);
 }
+//PWM functions from lab 9
+void set_PWM(double frequency) {
+
+	static double current_frequency;
+	if (frequency != current_frequency) {
+
+		if (!frequency) TCCR3B &= 0x08; //stops timer/counter
+		else TCCR3B |= 0x03; // resumes/continues timer/counter
+		if (frequency < 0.954) OCR3A = 0xFFFF;
+		else if (frequency > 31250) OCR3A = 0x0000;
+		else OCR3A = (short)(8000000 / (128 * frequency)) - 1;
+
+		TCNT3 = 0; // resets counter
+		current_frequency = frequency;
+	}
+}
+
+void PWM_on() { //Function from lab 9
+	TCCR3A = (1 << COM3A0);
+	TCCR3B = (1 << WGM32) | (1 << CS31) | (1 << CS30);
+	set_PWM(0);
+}
+
+void PWM_off() { //Function from lab 9
+	TCCR3A = 0x00;
+	TCCR3B = 0x00;
+}
+
 
 //------------------------Bluetooth_SM--------------------------
 enum Bluetooth_States { Bluetooth_Wait, Bluetooth_Receive } bluetoothStates;
@@ -63,7 +117,7 @@ enum LED_States { LED_Reset, LED_On } LEDStates;
 int LEDTick(int state) {
 	switch(state) { //Transitions
 		case LED_Reset:
-			//PORTC = 0x00;
+			PORTC = 0x00;
 			if(ledOutput != 0x00) {
 				state = LED_On;
 			}
@@ -92,12 +146,14 @@ int LEDTick(int state) {
 	return state;
 }
 
+#define PIR_sensor PB0
 //------------------------IR_SM--------------------------
 enum IR_States { IR_On } IRStates;
 
+//PIR Sensor information found from: 
+//https://www.exploreembedded.com/wiki/PIR_motion_Sensor_interface_with_Atmega128
 int IRTick(int state) {
-	unsigned char IRflag = 0xFF; //modify
-	unsigned short tempADC = ADC;
+	DDRB = (0 << PIR_sensor);
 	switch(state) { //Transitions
 		case IR_On:
 			state = IR_On;
@@ -109,183 +165,138 @@ int IRTick(int state) {
 
 	switch(state) { //Actions
 		case IR_On:
-			ledOutput = (char)tempADC;
-			PORTD = (char)tempADC >> 8;
+			if(((PINB) & (1<<PIR_sensor)) == 1) {
+				ledOutput = 0x03;
+			}
+			if(((PINB) & (1<<PIR_sensor)) == 0) {
+				ledOutput = 0x0F;
+			}
 			break;
 		default:
-			state = IR_On;
 			break;
 	}
 
 	return state;
 }
 
-//PWM functions from lab 9
-void set_PWM(double frequency) {
-
-	static double current_frequency;
-	if (frequency != current_frequency) {
-
-		if (!frequency) TCCR3B &= 0x08; //stops timer/counter
-		else TCCR3B |= 0x03; // resumes/continues timer/counter
-		if (frequency < 0.954) OCR3A = 0xFFFF;
-		else if (frequency > 31250) OCR3A = 0x0000;
-		else OCR3A = (short)(8000000 / (128 * frequency)) - 1;
-
-		TCNT3 = 0; // resets counter
-		current_frequency = frequency;
-	}
-}
-
-void PWM_on() { //Function from lab 9
-	TCCR3A = (1 << COM3A0);
-	TCCR3B = (1 << WGM32) | (1 << CS31) | (1 << CS30);
-	set_PWM(0);
-}
-
-void PWM_off() { //Function from lab 9
-	TCCR3A = 0x00;
-	TCCR3B = 0x00;
-}
-
-//Frequency to play notes
-#define C4 261.63
-#define D4 293.66
-#define E4 329.63
-#define F4 249.23
-#define G4 392.00
-#define A4 440.00
-#define B4 493.88
-#define C5 523.25
-
-const double lockSound[16] = {C5, C5, B4, B4, A4, A4, G4, G4, F4, F4, E4, E4, D4, D4, C4, C4};
-const double unlockSound[16] = {C4, C4, D4, D4, E4, E4, F4, F4, G4, G4, A4, A4, B4, B4, C5, C5};
-//const double lockedOut[16] = {C4, C4, C4, C4, C4, C4, C4, C4};
-const double correctPinSound[16] = {C4, C4, C4, C4, E4, E4, E4, E4, A4, A4, A4, A4, C5, C5, C5, C5};
-const double incorrectPin[16] = {C5, C5, C5, C5, C5, C5, C5, C5, C4, C4, C4, C4, C4, C4, C4, C4};
 //------------------------Speaker_SM--------------------------
-enum SpeakerStates{SpeakInit, SpeakOff, SpeakLock, SpeakUnlock, SpeakFail, SpeakLockout, SpeakCorrect} speakstate;
+enum SpeakerStates{SpeakerSetup, LockSound, UnlockSound, FailSound, AlarmSound, CorrectSound} speakerState;
 
 void SpeakerTick(){
 	static unsigned char index;
 	// state transitions
-	switch(speakstate){
-		case SpeakInit:
-			index = 0;
-			speakstate = SpeakOff;
-			break;
+	switch(speakerState){
 
-		case SpeakOff:
+		case SpeakerSetup:
 			if(sound == 1){
 				sound = 0;
-				speakstate = SpeakLock;
+				speakerState = LockSound;
 			}
 			else if(sound == 2){
 				sound = 0;
-				speakstate = SpeakUnlock;
+				speakerState = UnlockSound;
 			}
 			else if(sound == 3){
 				sound = 0;
-				speakstate = SpeakFail;
+				speakerState = FailSound;
 			}
 			else if(sound == 4){
 				sound = 0;
-				speakstate = SpeakLockout;
+				speakerState = AlarmSound;
 			}
 			else if(sound == 5){
 				sound = 0;
-				speakstate = SpeakCorrect;
+				speakerState = CorrectSound;
 			}
 			else{
-				speakstate = SpeakOff;
+				speakerState = SpeakerSetup;
 			}
 			break;
 
-		case SpeakLock:
+		case LockSound:
 			if(index < 16){
-				speakstate = SpeakLock;
+				speakerState = LockSound;
 			}
 			else{
 				index = 0;
-				speakstate = SpeakOff;
+				speakerState = SpeakerSetup;
 			}
 			break;
 		
-		case SpeakUnlock:
+		case UnlockSound:
 			if(index < 16){
-				speakstate = SpeakUnlock;
+				speakerState = UnlockSound;
 			}
 			else{
 				index = 0;
-				speakstate = SpeakOff;
+				speakerState = SpeakerSetup;
 			}
 			break;
 		
-		case SpeakFail:
+		case FailSound:
 			if(index < 16){
-				speakstate = SpeakFail;
+				speakerState = FailSound;
 			}
 			else{
 				index = 0;
-				speakstate = SpeakOff;
+				speakerState = SpeakerSetup;
 			}
 			break;
 
-		case SpeakCorrect:
+		case CorrectSound:
 			if(index < 16){
-				speakstate = SpeakCorrect;
+				speakerState = CorrectSound;
 			}
 			else{
 				index = 0;
-				speakstate = SpeakOff;
+				speakerState = SpeakerSetup;
 			}
 			break;	
 		
-		case SpeakLockout:
-			if(isLocked){
-				speakstate = SpeakLockout;
+		case AlarmSound:
+			if(index < 16){
+				speakerState = AlarmSound;
+				if (index == 15) {
+					index = 0; //repeat alarm
+				}
 			}
 			else{
 				index = 0;
-				speakstate = SpeakOff;
+				speakerState = SpeakerSetup;
 			}
 			break;
 		
 		default:
-			speakstate = SpeakInit;
+			speakerState = SpeakerSetup;
 			break;
 	}
 
-	// state actions
-	switch(speakstate){
-		case SpeakInit:
-			break;
-		
-		case SpeakOff:
+	switch(speakerState){ //Actions
+		case SpeakerSetup:
 			set_PWM(0);
 			break;
 		
-		case SpeakLock:
+		case LockSound:
 			set_PWM(lockSound[index]);
 			index++;
 			break;	
 		
-		case SpeakUnlock:
+		case UnlockSound:
 			set_PWM(unlockSound[index]);
 			index++;
 			break;
 
-		case SpeakFail:
+		case FailSound:
 			set_PWM(incorrectPin[index]);
 			index++;
 			break;
 
-		case SpeakLockout:
-			set_PWM(C4);
+		case AlarmSound:
+			set_PWM(alarmSound[index]);
 			index++;
 			break;
 
-		case SpeakCorrect:
+		case CorrectSound:
 			set_PWM(correctPinSound[index]);
 			index++;
 			break;
@@ -340,7 +351,7 @@ int main()
 	task3.TickFct = &IRTick;
 
 	//Speaker Task
-	task4.state = SpeakOff;
+	task4.state = SpeakerSetup;
 	task4.period = speakerPeriod;
 	task4.elapsedTime = speakerPeriod;
 	task4.TickFct = &SpeakerTick;
