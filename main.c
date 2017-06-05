@@ -10,7 +10,7 @@
 #include "timer.h" //timer functions
 #include "usart.h" //contains USART functions for bluetooth
 #include "scheduler.h" //contains the task struct + findGCD function
-
+#include "io.c"
 //-------------------Global Variables-----------------------
 
 unsigned char ledOutput; //lights up LEDs in hex
@@ -165,10 +165,14 @@ int BluetoothTick(int state) {
 			else {
 				isLocked = 1; //door should still be locked
 				passAttempt++;
+				LCD_ClearScreen();
+				
 				soundType = 3; //incorrect password sound
 				state = bluetoothInit;
 			}
 			if(passAttempt == 3) {
+				
+
 				soundType = 4; //alarm sound if user incorrectly enters pass 3 times
 			}
 			break;
@@ -186,6 +190,7 @@ int LEDTick(int state) {
 	switch(state) { //Transitions
 		case LED_Reset:
 			PORTC = 0x00;
+			//LCD_DisplayString(1,"Hello");
 			if(ledOutput != 0x00) {
 				state = LED_On;
 			}
@@ -377,7 +382,9 @@ int main()
 	DDRA = 0x00; PORTA = 0xFF; //initialize A to input
 	DDRB = 0xFF; PORTB = 0x00;
 	DDRC = 0xFF; PORTC = 0x00; //initialize C to output
-	DDRD = 0x02; PORTD = 0xFD; //TX = output, rest are inputs
+	//DDRD = 0x02; PORTD = 0xFD; //TX = output, rest are inputs
+	//DDRA = 0xFF; PORTA = 0x00;
+	DDRD = 0xFE; PORTD = 0x01; //RX = input, rest are outputs
 	
 	unsigned long int bluetoothPeriod = 10;
 	unsigned long int ledPeriod = 10;
@@ -388,11 +395,13 @@ int main()
 	systemPeriod = findGCD(systemPeriod, PIRPeriod);
 	systemPeriod = findGCD(systemPeriod, speakerPeriod);
 
+	//Initialize functions
 	PWM_on();
 	set_PWM(0);
-	ADC_init();
+	//ADC_init();
 	initUSART(0); //initialize to USART0
 	
+	LCD_init();
 	static task task1, task2, task3, task4;
 	task *tasks[] = { &task1, &task2, &task3, &task4 };
 	const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
