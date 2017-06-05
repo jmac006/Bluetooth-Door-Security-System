@@ -13,7 +13,9 @@
 #include "io.c"
 //-------------------Global Variables-----------------------
 
-unsigned char ledOutput; //lights up LEDs in hex
+unsigned char ledOutput = 0x08; //locked LED on
+unsigned char* lcdOutput1 = ""; //for first row of LCD
+unsigned char* lcdOutput2 = ""; //for second row of LCD
 unsigned char bluetoothData; //bluetooth data from USART
 unsigned char soundType = 1;
 unsigned char isLocked = 1; //boolean value
@@ -29,7 +31,7 @@ unsigned char passAttempt = 0; //counts number of incorrect password attempts
 #define B4 493.88
 #define C5 523.25
 
-const double lockSound[16] = {C5, C5, B4, B4, A4, A4, G4, G4, F4, F4, E4, E4, D4, D4, C4, C4};
+const double lockSound[16] = {C5, C5, C5, C5, A4, A4, A4, A4, E4, E4, E4, E4, C4, C4, C4, C4};
 const double unlockSound[16] = {C4, C4, D4, D4, E4, E4, F4, F4, G4, G4, A4, A4, B4, B4, C5, C5};
 const double alarmSound[16] = {G4, G4, G4, G4, C4, C4, C4, C4, G4, G4, G4, G4, C4, C4, C4, C4};
 const double correctPinSound[16] = {C4, C4, C4, C4, E4, E4, E4, E4, A4, A4, A4, A4, C5, C5, C5, C5};
@@ -130,43 +132,46 @@ int BluetoothTick(int state) {
 			soundType = 0; //no sound
 			break;
 		case bluetoothReceive1:
-			ledOutput = bluetoothData;
 			trypass1 = bluetoothData;
 			if(bluetoothData == 0xFF) { //lock the door
 				isLocked = 1;
-				soundType = 0;
+				ledOutput = 0x08;
+				soundType = 1;
 				state = bluetoothInit;
 			}
 			break;
 		case bluetoothReceive2:
-			ledOutput = bluetoothData;
 			trypass2 = bluetoothData;
 			if(bluetoothData == 0xFF) {
 				isLocked = 1;
-				soundType = 0;
+				ledOutput = 0x08;
+				soundType = 1;
 				state = bluetoothInit;
 			}
 			break;
 		case bluetoothReceive3:
 			if(bluetoothData == 0xFF) {
 				isLocked = 1;
-				soundType = 0;
+				ledOutput = 0x08;
+				soundType = 1;
 				state = bluetoothInit;
 			}
-			ledOutput = bluetoothData;
 			trypass3 = bluetoothData;
 			if(trypass1 == password1 && trypass2 == password2 && trypass3 == password3) {
 				isLocked = 0; //unlock the door
-				ledOutput = 0xFF;
+				ledOutput = 0x10; //unlock LED turns on
 				soundType = 5; //correct password sound
 				passAttempt = 0; //reset the password attempts
+				lcdOutput1 = "System Disarmed";
 				state = bluetoothInit;
 			}
 			else {
+				ledOutput = 0x08; //lock LED should still be on
 				isLocked = 1; //door should still be locked
+				lcdOutput1 = "System Armed";
 				passAttempt++;
-				LCD_ClearScreen();
-				
+				//unsigned char* output = "Attempts: " + passAttempt + "/3";
+				//LCD_DisplayString(1,output);
 				soundType = 3; //incorrect password sound
 				state = bluetoothInit;
 			}
@@ -189,7 +194,7 @@ enum LED_States { LED_Reset, LED_On } LEDStates;
 int LEDTick(int state) {
 	switch(state) { //Transitions
 		case LED_Reset:
-			PORTC = 0x00;
+			PORTD = 0x00;
 			//LCD_DisplayString(1,"Hello");
 			if(ledOutput != 0x00) {
 				state = LED_On;
@@ -209,7 +214,7 @@ int LEDTick(int state) {
 		case LED_Reset:
 			break;
 		case LED_On:
-			PORTC = ledOutput;
+			PORTD = ledOutput;
 			break;
 		default:
 			state = LED_Reset;
@@ -239,7 +244,7 @@ int IRTick(int state) {
 	switch(state) { //Actions
 		case IR_On:
 			if(((PINA) & (1<<PIR_sensor)) == 1 && isLocked == 1) { //Motion detected
-				ledOutput = 0x01;
+				ledOutput |= 0x20;
 				soundType = 4; //alarm sound
 			}
 			break;
@@ -377,6 +382,37 @@ void SpeakerTick(){
 	}
 }
 
+//------------------------LCD_SM---------------------------------
+enum LCD_States { LCDInit, displayMessage };
+
+int LCDTick(int state) {
+	switch(state) {
+		case LCDInit:
+			LCD_init();
+			state = displayMessage;
+			break;
+		case displayMessage:
+			break;
+		default:
+			state = LCDInit;
+			break;
+	}
+	
+	switch (state) {
+		case LCDInit:
+			break;
+		case displayMessage:
+			//LCD_ClearScreen();
+			LCD_DisplayString(1, lcdOutput1);
+			LCD_DisplayString(2, lcdOutput2);
+			break;
+		default:
+			break;
+	}
+
+	return state;
+}
+
 int main()
 {
 	DDRA = 0x00; PORTA = 0xFF; //initialize A to input
@@ -390,20 +426,22 @@ int main()
 	unsigned long int ledPeriod = 10;
 	unsigned long int PIRPeriod = 5;
 	unsigned long int speakerPeriod = 5;
+	unsigned long int lcdPeriod = 500;
 
 	unsigned long int systemPeriod = findGCD(bluetoothPeriod,ledPeriod);
 	systemPeriod = findGCD(systemPeriod, PIRPeriod);
 	systemPeriod = findGCD(systemPeriod, speakerPeriod);
+	systemPeriod = findGCD(systemPeriod, lcdPeriod);
 
 	//Initialize functions
 	PWM_on();
 	set_PWM(0);
 	//ADC_init();
 	initUSART(0); //initialize to USART0
-	
-	LCD_init();
-	static task task1, task2, task3, task4;
-	task *tasks[] = { &task1, &task2, &task3, &task4 };
+	//LCD_init();
+
+	static task task1, task2, task3, task4, task5;
+	task *tasks[] = { &task1, &task2, &task3, &task4, &task5 };
 	const unsigned short numTasks = sizeof(tasks)/sizeof(task*);
 
 	//Bluetooth Task
@@ -429,6 +467,12 @@ int main()
 	task4.period = speakerPeriod;
 	task4.elapsedTime = speakerPeriod;
 	task4.TickFct = &SpeakerTick;
+
+	//LCD Task
+	task5.state = LCDInit;
+	task5.period = lcdPeriod;
+	task5.elapsedTime = lcdPeriod;
+	task5.TickFct = &LCDTick;
 
 	// Set the timer and turn it on
 	TimerSet(systemPeriod); //period
