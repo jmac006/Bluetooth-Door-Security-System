@@ -14,13 +14,14 @@
 //-------------------Global Variables-----------------------
 
 unsigned char ledOutput = 0x08; //locked LED on
-unsigned char* lcdOutput1 = ""; //for first row of LCD
+unsigned char* prevOutputMessage = "System Armed"; //to determine if there's a new message to output
+unsigned char* lcdOutput1 = "System Armed"; //for first row of LCD
 unsigned char* lcdOutput2 = ""; //for second row of LCD
 unsigned char bluetoothData; //bluetooth data from USART
 unsigned char soundType = 1; //6 sounds (including no sound)
 unsigned char isLocked = 1; //boolean value
 unsigned char passAttempt = 0; //counts number of incorrect password attempts
-unsigned char newMessageFlag = 0; //boolean value, flag to show if there's a new message to output
+
 
 //Frequency to play notes
 #define C4 261.63
@@ -83,6 +84,7 @@ void PWM_off() { //Function from lab 9
 //------------------------Bluetooth_SM--------------------------
 enum Bluetooth_States { bluetoothInit, bluetoothReceive1, bluetoothReceive2, bluetoothReceive3 } bluetoothStates;
 
+//User can change password here
 unsigned char password1 = 0x01;
 unsigned char password2 = 0x02;
 unsigned char password3 = 0x03;
@@ -150,7 +152,6 @@ int BluetoothTick(int state) {
 			trypass1 = bluetoothData;
 			if(bluetoothData == 0xFF) { //lock the door
 				ArmSystem();
-				newMessageFlag = 1;
 				lcdOutput1 = "System Armed";
 				state = bluetoothInit;
 			}
@@ -159,7 +160,6 @@ int BluetoothTick(int state) {
 			trypass2 = bluetoothData;
 			if(bluetoothData == 0xFF) {
 				ArmSystem();
-				newMessageFlag = 1;
 				lcdOutput1 = "System Armed";
 				state = bluetoothInit;
 			}
@@ -167,21 +167,18 @@ int BluetoothTick(int state) {
 		case bluetoothReceive3:
 			if(bluetoothData == 0xFF) {
 				ArmSystem();
-				newMessageFlag = 1;
 				lcdOutput1 = "System Armed";
 				state = bluetoothInit;
 			}
 			trypass3 = bluetoothData;
 			if(trypass1 == password1 && trypass2 == password2 && trypass3 == password3) {
 				DisarmSystem();
-				newMessageFlag = 1;
 				lcdOutput1 = "System Disarmed";
 				state = bluetoothInit;
 			}
 			else {
 				ledOutput = 0x08; //lock LED should still be on
 				isLocked = 1; //door should still be locked
-				newMessageFlag = 1;
 				lcdOutput1 = "System Armed";
 				passAttempt++;
 				//unsigned char* output = "Attempts: " + passAttempt + "/3";
@@ -260,7 +257,6 @@ int IRTick(int state) {
 			if(((PINA) & (1<<PIR_sensor)) == 1 && isLocked == 1) { //Motion detected
 				ledOutput |= 0x20;
 				soundType = 4; //alarm sound
-				newMessageFlag = 1;
 				lcdOutput1 = "Motion Detected";
 			}
 			break;
@@ -409,7 +405,7 @@ int LCDTick(int state) {
 			break;
 		case displayMessage:
 			state = displayMessage;
-			if(newMessageFlag) {
+			if(prevOutputMessage != lcdOutput1) { //or lcdOutput2
 				state = clearMessage;
 			}
 			break;
@@ -425,11 +421,11 @@ int LCDTick(int state) {
 			break;
 		case displayMessage:
 			LCD_DisplayString(1, lcdOutput1);
-			//LCD_DisplayString(2, lcdOutput2);
+			LCD_DisplayString(2, lcdOutput2);
 			break;
 		case clearMessage:
+			prevOutputMessage = lcdOutput1;
 			LCD_ClearScreen();
-			newMessageFlag = 0;
 		default:
 			break;
 	}
