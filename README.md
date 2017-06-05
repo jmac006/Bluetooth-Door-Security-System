@@ -10,13 +10,27 @@ Materials:
 - Piezo buzzer
 - LightBlue iPhone app
 - PIR Sensor (Passive Infrared Sensor)
+- LCD screen
 
 Build upons:
 - Bluetooth module
 - USART
 - PIR sensor 
 
+PIN-OUT:
+A1 = PIR Sensor
+B6 = Speaker/Piezo buzzer
+C0-C7 = LCD Screen
+D0 = Bluetooth TX
+D1 = Bluetooth RX
+D3 = Lock LED
+D4 = Unlock LED
+D5 = Motion LED
+D6 = LCD RS
+D7 = LCD Enable
+
 Known bugs:
+- PIR Sensor needs its own PORT, cannot have any other add-ons in same port
 
 Sources:
 - https://www.exploreembedded.com/wiki/PIR_motion_Sensor_interface_with_Atmega128
