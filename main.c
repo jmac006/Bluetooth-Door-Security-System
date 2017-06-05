@@ -17,9 +17,10 @@ unsigned char ledOutput = 0x08; //locked LED on
 unsigned char* lcdOutput1 = ""; //for first row of LCD
 unsigned char* lcdOutput2 = ""; //for second row of LCD
 unsigned char bluetoothData; //bluetooth data from USART
-unsigned char soundType = 1;
+unsigned char soundType = 1; //6 sounds (including no sound)
 unsigned char isLocked = 1; //boolean value
 unsigned char passAttempt = 0; //counts number of incorrect password attempts
+unsigned char newMessageFlag = 0; //boolean value, flag to show if there's a new message to output
 
 //Frequency to play notes
 #define C4 261.63
@@ -87,6 +88,20 @@ unsigned char password2 = 0x02;
 unsigned char password3 = 0x03;
 unsigned char trypass1, trypass2, trypass3;
 
+void ArmSystem(void) {
+	isLocked = 1;
+	ledOutput = 0x08;
+	soundType = 1;
+}
+
+void DisarmSystem(void) {
+	isLocked = 0; //unlock the door
+	ledOutput = 0x10; //unlock LED turns on
+	soundType = 5; //correct password sound
+	passAttempt = 0; //reset the password attempts
+	
+}
+
 int BluetoothTick(int state) {
 	switch(state) { //Transitions
 		case bluetoothInit:
@@ -134,40 +149,39 @@ int BluetoothTick(int state) {
 		case bluetoothReceive1:
 			trypass1 = bluetoothData;
 			if(bluetoothData == 0xFF) { //lock the door
-				isLocked = 1;
-				ledOutput = 0x08;
-				soundType = 1;
+				ArmSystem();
+				newMessageFlag = 1;
+				lcdOutput1 = "System Armed";
 				state = bluetoothInit;
 			}
 			break;
 		case bluetoothReceive2:
 			trypass2 = bluetoothData;
 			if(bluetoothData == 0xFF) {
-				isLocked = 1;
-				ledOutput = 0x08;
-				soundType = 1;
+				ArmSystem();
+				newMessageFlag = 1;
+				lcdOutput1 = "System Armed";
 				state = bluetoothInit;
 			}
 			break;
 		case bluetoothReceive3:
 			if(bluetoothData == 0xFF) {
-				isLocked = 1;
-				ledOutput = 0x08;
-				soundType = 1;
+				ArmSystem();
+				newMessageFlag = 1;
+				lcdOutput1 = "System Armed";
 				state = bluetoothInit;
 			}
 			trypass3 = bluetoothData;
 			if(trypass1 == password1 && trypass2 == password2 && trypass3 == password3) {
-				isLocked = 0; //unlock the door
-				ledOutput = 0x10; //unlock LED turns on
-				soundType = 5; //correct password sound
-				passAttempt = 0; //reset the password attempts
+				DisarmSystem();
+				newMessageFlag = 1;
 				lcdOutput1 = "System Disarmed";
 				state = bluetoothInit;
 			}
 			else {
 				ledOutput = 0x08; //lock LED should still be on
 				isLocked = 1; //door should still be locked
+				newMessageFlag = 1;
 				lcdOutput1 = "System Armed";
 				passAttempt++;
 				//unsigned char* output = "Attempts: " + passAttempt + "/3";
@@ -246,6 +260,8 @@ int IRTick(int state) {
 			if(((PINA) & (1<<PIR_sensor)) == 1 && isLocked == 1) { //Motion detected
 				ledOutput |= 0x20;
 				soundType = 4; //alarm sound
+				newMessageFlag = 1;
+				lcdOutput1 = "Motion Detected";
 			}
 			break;
 		default:
@@ -383,7 +399,7 @@ void SpeakerTick(){
 }
 
 //------------------------LCD_SM---------------------------------
-enum LCD_States { LCDInit, displayMessage };
+enum LCD_States { LCDInit, displayMessage, clearMessage };
 
 int LCDTick(int state) {
 	switch(state) {
@@ -392,7 +408,13 @@ int LCDTick(int state) {
 			state = displayMessage;
 			break;
 		case displayMessage:
+			state = displayMessage;
+			if(newMessageFlag) {
+				state = clearMessage;
+			}
 			break;
+		case clearMessage:
+			state = displayMessage;
 		default:
 			state = LCDInit;
 			break;
@@ -402,10 +424,12 @@ int LCDTick(int state) {
 		case LCDInit:
 			break;
 		case displayMessage:
-			//LCD_ClearScreen();
 			LCD_DisplayString(1, lcdOutput1);
-			LCD_DisplayString(2, lcdOutput2);
+			//LCD_DisplayString(2, lcdOutput2);
 			break;
+		case clearMessage:
+			LCD_ClearScreen();
+			newMessageFlag = 0;
 		default:
 			break;
 	}
@@ -426,7 +450,7 @@ int main()
 	unsigned long int ledPeriod = 10;
 	unsigned long int PIRPeriod = 5;
 	unsigned long int speakerPeriod = 5;
-	unsigned long int lcdPeriod = 500;
+	unsigned long int lcdPeriod = 100;
 
 	unsigned long int systemPeriod = findGCD(bluetoothPeriod,ledPeriod);
 	systemPeriod = findGCD(systemPeriod, PIRPeriod);
