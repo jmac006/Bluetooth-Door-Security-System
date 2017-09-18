@@ -1,5 +1,5 @@
-# CS120B Door Security System
-CS120B Project by: Justin Mac
+Door Security System
+Project by: Justin Mac
 
 Introduction:
 This project is a door security system, that you can control via bluetooth. Using the iPhone app, the user inputs a passcode (a sequence of 3 hex codes - 0x01, 0x02, 0x03). If the user does not input the correct passcode after 3 attempts, the alarm goes off. In addition, the alarm also goes off if the door is locked and the PIR sensor detects motion.  If the door is unlocked, any motion detected by the PIR sensor is ignored. The user can then lock the door by sending the hex code 0xFF using the iPhone app.
